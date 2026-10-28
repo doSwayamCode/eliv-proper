@@ -13,8 +13,13 @@ export function SiteAfterMain() {
     pathname === "/industries" || pathname.startsWith("/industries/");
   const isCareers = pathname === "/careers" || pathname.startsWith("/careers/");
   const isHome = pathname === "/";
+  const isLegal =
+    pathname === "/privacy-policy" ||
+    pathname.startsWith("/privacy-policy/") ||
+    pathname === "/terms" ||
+  pathname.startsWith("/terms/");
 
-  if (isIndustries || isCareers) return null;
+  if (isIndustries || isCareers || isLegal) return null;
 
   return (
     <>

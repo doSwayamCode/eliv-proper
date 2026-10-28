@@ -108,9 +108,23 @@ export function SiteFooter() {
           </div>
         </div>
 
-        <p className="mt-14 border-t border-black/10 pt-6 text-center text-xs tracking-wide text-zinc-500">
-          © {new Date().getFullYear()} Eliv Logistics. All rights reserved.
-        </p>
+        <div className="mt-14 flex flex-col items-center justify-between gap-4 border-t border-black/10 pt-6 text-xs tracking-wide text-zinc-500 sm:flex-row">
+          <p>© {new Date().getFullYear()} Eliv Logistics. All rights reserved.</p>
+          <div className="flex flex-wrap items-center justify-center gap-6">
+            <Link
+              href="/privacy-policy"
+              className="transition-colors hover:text-neutral-950"
+            >
+              Privacy Policy
+            </Link>
+            <Link
+              href="/terms"
+              className="transition-colors hover:text-neutral-950"
+            >
+              Terms &amp; Conditions
+            </Link>
+          </div>
+        </div>
       </div>
     </footer>
   );
