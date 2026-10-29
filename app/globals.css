@@ -76,11 +76,10 @@ body {
   top: 0;
   left: 0;
   padding: 0.2rem 0.45rem;
-  border: 1px solid rgb(46 230 194 / 0.55);
   border-radius: 3px;
-  background: rgb(3 18 24 / 0.82);
-  backdrop-filter: blur(4px);
-  color: #e9fffa;
+  background: #0d2329;
+  box-shadow: 0 4px 14px rgb(13 35 41 / 0.18);
+  color: #ffffff;
   font-size: 0.6rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -99,7 +98,7 @@ body {
   left: 50%;
   transform: translate(-50%, 0);
   border: 5px solid transparent;
-  border-top-color: rgb(46 230 194 / 0.55);
+  border-top-color: #0d2329;
 }
 
 .globe-label[data-visible] {
