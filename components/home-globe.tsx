@@ -1,156 +1,158 @@
 "use client";
 
-import createGlobe from "cobe";
 import { useEffect, useRef } from "react";
+import type { GlobePlace, GlobeRoute, ProjectedPlace } from "@/lib/globe/globe-scene";
 
-const places = [
-  { id: "sf", name: "San Francisco", location: [37.78, -122.44] as [number, number] },
-  { id: "nyc", name: "New York", location: [40.71, -74.01] as [number, number] },
-  { id: "london", name: "London", location: [51.51, -0.13] as [number, number] },
-  { id: "tokyo", name: "Tokyo", location: [35.68, 139.65] as [number, number] },
-  { id: "sydney", name: "Sydney", location: [-33.87, 151.21] as [number, number] },
-  { id: "singapore", name: "Singapore", location: [1.35, 103.82] as [number, number] },
-  { id: "dubai", name: "Dubai", location: [25.2, 55.27] as [number, number] },
-  { id: "saopaulo", name: "São Paulo", location: [-23.55, -46.63] as [number, number] },
-  { id: "capetown", name: "Cape Town", location: [-33.92, 18.42] as [number, number] },
+const places: (GlobePlace & { name: string })[] = [
+  { id: "sf", name: "San Francisco", lat: 37.78, lng: -122.44 },
+  { id: "nyc", name: "New York", lat: 40.71, lng: -74.01 },
+  { id: "london", name: "London", lat: 51.51, lng: -0.13 },
+  { id: "tokyo", name: "Tokyo", lat: 35.68, lng: 139.65 },
+  { id: "sydney", name: "Sydney", lat: -33.87, lng: 151.21 },
+  { id: "singapore", name: "Singapore", lat: 1.35, lng: 103.82 },
+  { id: "dubai", name: "Dubai", lat: 25.2, lng: 55.27 },
+  { id: "saopaulo", name: "São Paulo", lat: -23.55, lng: -46.63 },
+  { id: "capetown", name: "Cape Town", lat: -33.92, lng: 18.42 },
 ];
 
-function isFacing(lat: number, lng: number, phi: number, tilt: number) {
-  const latR = (lat * Math.PI) / 180;
-  const lngR = (lng * Math.PI) / 180 - Math.PI;
-  const cosLat = Math.cos(latR);
-  const x = -cosLat * Math.sin(lngR);
-  const y = Math.sin(latR);
-  const z = cosLat * Math.cos(lngR);
-  const cosTheta = Math.cos(tilt);
-  const sinTheta = Math.sin(tilt);
-  const cosPhi = Math.cos(phi);
-  const sinPhi = Math.sin(phi);
-  const facing = -sinPhi * cosTheta * x + sinTheta * y + cosPhi * cosTheta * z;
-  return facing > 0.15;
-}
-
-const arc = [0.3, 0.5, 1] as [number, number, number];
-
-const arcs = [
-  { id: "sf-tokyo", from: places[0].location, to: places[3].location, color: arc },
-  { id: "nyc-london", from: places[1].location, to: places[2].location, color: arc },
-  { id: "london-dubai", from: places[2].location, to: places[6].location, color: arc },
+const routes: GlobeRoute[] = [
+  { from: "sf", to: "tokyo" },
+  { from: "nyc", to: "london" },
+  { from: "london", to: "dubai" },
+  { from: "dubai", to: "singapore" },
+  { from: "singapore", to: "sydney" },
+  { from: "tokyo", to: "sydney" },
+  { from: "saopaulo", to: "capetown" },
+  { from: "nyc", to: "saopaulo" },
+  { from: "capetown", to: "dubai" },
+  { from: "sf", to: "nyc" },
 ];
+
+/** Auto-spin in radians per second. */
+const SPIN = 0.07;
 
 export function HomeGlobe() {
+  const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const labels = useRef<Record<string, HTMLSpanElement | null>>({});
-  const pointer = useRef<{ x: number; y: number; phi: number; tilt: number } | null>(null);
-  const phiOffset = useRef(0);
-  const dragging = useRef(false);
 
   useEffect(() => {
+    const wrap = wrapRef.current;
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!wrap || !canvas) return;
+    let disposed = false;
+    let cleanup = () => {};
 
-    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    let phi = 0;
-    let tilt = 0.2;
-    let frame = 0;
-    let width = canvas.offsetWidth;
+    (async () => {
+      const { GlobeScene } = await import("@/lib/globe/globe-scene");
+      if (disposed) return;
 
-    const globe = createGlobe(canvas, {
-      devicePixelRatio: Math.min(window.devicePixelRatio, 2),
-      width: width * 2,
-      height: width * 2,
-      phi,
-      theta: tilt,
-      dark: 2,
-      diffuse: 0,
-      mapSamples: 10000,
-      mapBrightness: 12,
-      mapBaseBrightness: 0,
-      baseColor: [0.02, 0.02, 0.1],
-      markerColor: [0, 1, 0.8],
-      glowColor: [0, 0.5, 0.8],
-      markerElevation: 0,
-      arcColor: arc,
-      arcWidth: 1,
-      arcHeight: 0.4,
-      scale: 1,
-      offset: [0, 0],
-      markers: places.map((place) => ({
-        id: place.id,
-        location: place.location,
-        size: 0.05,
-      })),
-      arcs,
-    });
-
-    const paint = () => {
-      if (!dragging.current && !reduce) phi += 0.003;
-      const currentPhi = phi + phiOffset.current;
-      globe.update({
-        phi: currentPhi,
-        theta: tilt,
-        width: width * 2,
-        height: width * 2,
-      });
-      for (const place of places) {
-        const label = labels.current[place.id];
-        if (!label) continue;
-        label.hidden = !isFacing(place.location[0], place.location[1], currentPhi, tilt);
-      }
-      frame = requestAnimationFrame(paint);
-    };
-    frame = requestAnimationFrame(paint);
-
-    const onResize = () => {
-      width = canvas.offsetWidth;
-    };
-    const observer = new ResizeObserver(onResize);
-    observer.observe(canvas);
-
-    const onPointerDown = (event: PointerEvent) => {
-      dragging.current = true;
-      pointer.current = {
-        x: event.clientX,
-        y: event.clientY,
-        phi: phiOffset.current,
-        tilt,
+      const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      const shown: Record<string, boolean> = {};
+      // labels are positioned from the projected point every frame and fade out
+      // as soon as their place turns past the visible face of the globe
+      const onFrame = (projected: ProjectedPlace[]) => {
+        for (const p of projected) {
+          const el = labels.current[p.id];
+          if (!el) continue;
+          el.style.transform = `translate3d(${p.x}px, ${p.y}px, 0) translate(-50%, calc(-100% - 10px))`;
+          if (shown[p.id] !== p.visible) {
+            shown[p.id] = p.visible;
+            el.toggleAttribute("data-visible", p.visible);
+          }
+        }
       };
-      canvas.setPointerCapture(event.pointerId);
-    };
-    const onPointerMove = (event: PointerEvent) => {
-      if (!pointer.current) return;
-      const dx = event.clientX - pointer.current.x;
-      const dy = event.clientY - pointer.current.y;
-      phiOffset.current = pointer.current.phi + dx / 280;
-      tilt = Math.min(1.2, Math.max(-1.2, pointer.current.tilt - dy / 280));
-    };
-    const onPointerUp = () => {
-      dragging.current = false;
-      pointer.current = null;
-    };
 
-    canvas.addEventListener("pointerdown", onPointerDown);
-    canvas.addEventListener("pointermove", onPointerMove);
-    canvas.addEventListener("pointerup", onPointerUp);
-    canvas.addEventListener("pointercancel", onPointerUp);
+      let globe: InstanceType<typeof GlobeScene>;
+      try {
+        globe = new GlobeScene(canvas, places, routes, { reducedMotion, onFrame });
+      } catch {
+        return; // no WebGL: the hero still reads fine without the globe
+      }
+      // start with APAC facing the viewer
+      globe.phi = -2.35;
+
+      const resize = () => globe.resize(wrap.clientWidth, wrap.clientHeight);
+      resize();
+      const ro = new ResizeObserver(resize);
+      ro.observe(wrap);
+
+      // drag to spin / tilt, with a little inertia on release
+      let dragging = false;
+      let lastX = 0, lastY = 0, velocity = 0;
+      const onDown = (e: PointerEvent) => {
+        dragging = true;
+        lastX = e.clientX;
+        lastY = e.clientY;
+        velocity = 0;
+        canvas.setPointerCapture(e.pointerId);
+      };
+      const onMove = (e: PointerEvent) => {
+        if (!dragging) return;
+        const dx = (e.clientX - lastX) / 260;
+        globe.phi += dx;
+        velocity = dx;
+        globe.tilt = Math.min(1.1, Math.max(-0.6, globe.tilt + (e.clientY - lastY) / 320));
+        lastX = e.clientX;
+        lastY = e.clientY;
+      };
+      const onUp = () => (dragging = false);
+      canvas.addEventListener("pointerdown", onDown);
+      canvas.addEventListener("pointermove", onMove);
+      canvas.addEventListener("pointerup", onUp);
+      canvas.addEventListener("pointercancel", onUp);
+
+      // render only while the hero is on screen
+      let visible = true;
+      const io = new IntersectionObserver(([e]) => (visible = e.isIntersecting), { rootMargin: "100px" });
+      io.observe(wrap);
+
+      let raf = 0;
+      let last = performance.now();
+      const tick = (now: number) => {
+        raf = requestAnimationFrame(tick);
+        if (!visible || document.hidden) {
+          last = now;
+          return;
+        }
+        const dt = Math.min(0.05, (now - last) / 1000);
+        last = now;
+        if (!dragging) {
+          velocity *= Math.pow(0.03, dt);
+          globe.phi += velocity + (reducedMotion ? 0 : SPIN * dt);
+        }
+        globe.render(now / 1000);
+      };
+      raf = requestAnimationFrame(tick);
+
+      cleanup = () => {
+        cancelAnimationFrame(raf);
+        ro.disconnect();
+        io.disconnect();
+        canvas.removeEventListener("pointerdown", onDown);
+        canvas.removeEventListener("pointermove", onMove);
+        canvas.removeEventListener("pointerup", onUp);
+        canvas.removeEventListener("pointercancel", onUp);
+        globe.dispose();
+      };
+    })();
 
     return () => {
-      cancelAnimationFrame(frame);
-      observer.disconnect();
-      canvas.removeEventListener("pointerdown", onPointerDown);
-      canvas.removeEventListener("pointermove", onPointerMove);
-      canvas.removeEventListener("pointerup", onPointerUp);
-      canvas.removeEventListener("pointercancel", onPointerUp);
-      globe.destroy();
+      disposed = true;
+      cleanup();
     };
   }, []);
 
   return (
-    <div className="pointer-events-auto absolute top-1/2 right-[-18%] z-0 aspect-square w-[min(118vh,1280px)] -translate-y-[46%] sm:right-[-10%] lg:right-[-6%]">
+    <div
+      ref={wrapRef}
+      className="pointer-events-auto absolute top-1/2 right-[-18%] z-0 aspect-square w-[min(118vh,1280px)] -translate-y-[46%] sm:right-[-10%] lg:right-[-6%]"
+    >
       <canvas
         ref={canvasRef}
         className="h-full w-full cursor-grab touch-none active:cursor-grabbing"
-        aria-label="Rotating globe of trade routes"
+        aria-label="Rotating globe of Eliv trade routes"
+        role="img"
       />
       {places.map((place) => (
         <span
@@ -159,8 +161,6 @@ export function HomeGlobe() {
             labels.current[place.id] = node;
           }}
           className="globe-label pointer-events-none"
-          hidden
-          style={{ positionAnchor: `--cobe-${place.id}` }}
         >
           {place.name}
         </span>

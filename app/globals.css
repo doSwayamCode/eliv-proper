@@ -73,17 +73,23 @@ body {
 
 .globe-label {
   position: absolute;
-  bottom: anchor(top);
-  left: anchor(center);
-  translate: -50%;
-  margin-bottom: 8px;
-  padding: 0.15rem 0.35rem;
-  background: #0045f6;
-  color: #fff;
+  top: 0;
+  left: 0;
+  padding: 0.2rem 0.45rem;
+  border: 1px solid rgb(46 230 194 / 0.55);
+  border-radius: 3px;
+  background: rgb(3 18 24 / 0.82);
+  backdrop-filter: blur(4px);
+  color: #e9fffa;
   font-size: 0.6rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   white-space: nowrap;
+  will-change: transform, opacity;
+  /* hidden until its place faces the viewer; fades + blurs out past the horizon */
+  opacity: 0;
+  filter: blur(4px);
+  transition: opacity 0.35s ease, filter 0.35s ease;
 }
 
 .globe-label::after {
@@ -91,13 +97,14 @@ body {
   position: absolute;
   top: 100%;
   left: 50%;
-  transform: translate(-50%, -1px);
+  transform: translate(-50%, 0);
   border: 5px solid transparent;
-  border-top-color: #0045f6;
+  border-top-color: rgb(46 230 194 / 0.55);
 }
 
-.globe-label[hidden] {
-  display: none;
+.globe-label[data-visible] {
+  opacity: 1;
+  filter: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
