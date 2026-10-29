@@ -2,88 +2,71 @@
 
 import { useEffect, useRef, useState } from "react";
 
-/** Frame sequences built by scripts/extract-journey-frames.sh (12 fps of the 20 s master). */
-const FRAME_COUNT = 240;
-const FPS = 12;
+/** Frame sequences built by scripts/build-journey-film.mjs (10 fps of the 32.5 s stock-footage edit). */
+const FRAME_COUNT = 325;
+const FPS = 10;
 const FRAME_SIZE = { d: [1600, 900], m: [960, 540] } as const;
-const frameSrc = (set: "d" | "m", i: number) => `/journey/${set}/${String(i).padStart(3, "0")}.webp`;
+const frameSrc = (set: "d" | "m", i: number) => `/journey/${set}/${String(i).padStart(3, "0")}.avif`;
+/** shown, still, in browsers that cannot decode the AVIF frames */
+const POSTER = "/journey/poster.jpg";
 
-/** `at` is the footage time (s) the chapter starts; `focus` is the horizontal subject position for cover-cropping. */
+/** `at` is the edit time (s) the chapter starts; `focus` is the horizontal subject position for cover-cropping. */
 const CHAPTERS = [
   {
     key: "pickup",
     at: 0,
-    focus: 0.42,
+    focus: 0.62,
     status: "Picked up",
     eyebrow: "01 — Pickup",
     title: "Handed over at the door.",
-    body: "Our courier collects your consignment and walks it straight to its container. From the first touch it is on one file, with one team.",
+    body: "Our courier collects your consignment and loads it for the depot. From the first touch it is on one file, with one team.",
   },
   {
-    key: "pack",
-    at: 4.6,
-    focus: 0.45,
-    status: "Packing",
-    eyebrow: "02 — Packed",
-    title: "Stowed by hand, checked by eye.",
-    body: "Every carton is placed, braced and counted by our own people, not a subcontractor's, so what leaves is what you booked.",
+    key: "depot",
+    at: 10.3,
+    focus: 0.66,
+    status: "Checked in",
+    eyebrow: "02 — Depot",
+    title: "Checked in, counted out.",
+    body: "Every carton is received, counted and booked against your consignment by our own people, not a subcontractor's.",
   },
   {
-    key: "dispatch",
-    at: 7.9,
+    key: "road",
+    at: 13.6,
     focus: 0.5,
-    status: "Sealed · dispatched",
-    eyebrow: "03 — Dispatch",
-    title: "Sealed and on the road.",
-    body: "Doors locked, seal recorded, driver booked on the same file. The handoff from depot to road is a lift, not a phone call.",
+    status: "In transit",
+    eyebrow: "03 — Road",
+    title: "Every leg of the journey.",
+    body: "Local, metro and interstate legs run on live tracking. You see the truck the way our dispatch team does.",
   },
   {
     key: "port",
-    at: 9.95,
-    focus: 0.42,
+    at: 20.45,
+    focus: 0.5,
     status: "At terminal",
     eyebrow: "04 — Port",
-    title: "Into the terminal, on time.",
-    body: "Slots, customs release and stevedoring are coordinated in-house, so your box makes the vessel cut-off through the night.",
-  },
-  {
-    key: "load",
-    at: 12,
-    focus: 0.45,
-    status: "Loaded aboard",
-    eyebrow: "05 — Load",
     title: "Quay to vessel, no gaps.",
-    body: "Lifted from chassis to ship under our supervision, with every move logged against your consignment.",
+    body: "Terminal slots, customs release and stevedoring are coordinated in-house, so your box makes the vessel cut-off.",
   },
   {
     key: "sea",
-    at: 17.9,
+    at: 27.47,
     focus: 0.5,
-    status: "Under way",
-    eyebrow: "06 — Sea",
+    status: "Loaded aboard",
+    eyebrow: "05 — Sea",
     title: "Across APAC, tracked to the door.",
     body: "Australia, New Zealand, Hong Kong and China. One operator from the depot gate to the final mile.",
   },
 ];
 
-/** Shipment clock in minutes, keyed to footage time; the jump at 10 s is the day-to-night cut in the film. */
-const CLOCK: [number, number][] = [
-  [0, 8 * 60 + 40],
-  [9.95, 14 * 60 + 55],
-  [10, 19 * 60 + 40],
-  [20, 22 * 60 + 10],
-];
+/** Shipment clock (minutes) across the film: a working day from first pickup to vessel cut-off. */
+const CLOCK_START = 7 * 60 + 50;
+const CLOCK_END = 17 * 60 + 40;
+const FILM_LENGTH = (FRAME_COUNT - 1) / FPS;
 
 function clockAt(t: number) {
-  for (let i = 1; i < CLOCK.length; i++) {
-    const [t0, m0] = CLOCK[i - 1];
-    const [t1, m1] = CLOCK[i];
-    if (t <= t1) {
-      const m = Math.floor(m0 + ((t - t0) / (t1 - t0)) * (m1 - m0));
-      return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
-    }
-  }
-  return "22:10";
+  const m = Math.floor(CLOCK_START + (t / FILM_LENGTH) * (CLOCK_END - CLOCK_START));
+  return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
 }
 
 /** Coarse-to-fine load order (every 16th frame, then 8th, …) so scrubbing works before the set is complete. */
@@ -101,8 +84,8 @@ function loadOrder() {
 }
 
 /**
- * Scroll-scrubbed live-action film: courier pickup → packing → dispatch →
- * port at night → loaded aboard → vessel under way. Frames are drawn to a canvas
+ * Scroll-scrubbed live-action film: courier pickup → depot check → road →
+ * port → vessel. Frames are drawn to a canvas
  * from a pre-decoded image sequence, which stays smooth where seeking a <video> stutters.
  * The section is tall and its stage is `position: sticky`, so nothing is pinned or reflowed.
  */
@@ -137,24 +120,49 @@ export function JourneyShowcase() {
     let last = 0;
     let visible = false;
 
-    const load = () => {
+    const decode = async (src: string) => {
+      const img = new Image();
+      img.decoding = "async";
+      img.src = src;
+      await img.decode();
+      return img;
+    };
+
+    const load = async () => {
       if (loading) return;
       loading = true;
-      const queue = loadOrder();
+      // the first frame doubles as the AVIF support check; without it the stage holds the poster
+      try {
+        frames[0] = await decode(frameSrc(set, 0));
+      } catch {
+        try {
+          frames[0] = await decode(POSTER);
+        } catch {
+          return;
+        }
+        if (!disposed) {
+          setReady(true);
+          dirty = true;
+          kick();
+        }
+        return;
+      }
+      if (disposed) return;
+      setReady(true);
+      dirty = true;
+      kick();
+      const queue = loadOrder().filter((i) => i !== 0);
       const worker = async () => {
         while (queue.length && !disposed) {
           const i = queue.shift()!;
-          const img = new Image();
-          img.decoding = "async";
-          img.src = frameSrc(set, i);
+          let img: HTMLImageElement;
           try {
-            await img.decode();
+            img = await decode(frameSrc(set, i));
           } catch {
             continue;
           }
           if (disposed) return;
           frames[i] = img;
-          if (i === 0) setReady(true);
           dirty = true;
           kick();
         }
@@ -248,7 +256,8 @@ export function JourneyShowcase() {
 
     // start fetching well before the section arrives, but never ahead of the hero's own assets
     const whenIdle = () => {
-      const go = () => ("requestIdleCallback" in window ? requestIdleCallback(load, { timeout: 1500 }) : setTimeout(load, 300));
+      const start = () => void load();
+      const go = () => ("requestIdleCallback" in window ? requestIdleCallback(start, { timeout: 1500 }) : setTimeout(start, 300));
       if (document.readyState === "complete") go();
       else window.addEventListener("load", go, { once: true });
     };
@@ -276,7 +285,7 @@ export function JourneyShowcase() {
   }, []);
 
   return (
-    <section ref={sectionRef} id="journey" aria-label="From depot to vessel" className="relative h-[700vh] bg-[#07090d] md:h-[820vh]">
+    <section ref={sectionRef} id="journey" aria-label="From depot to vessel" className="relative h-[900vh] bg-[#07090d] md:h-[1050vh]">
       <div className="journey-stage sticky top-0 h-[100svh] w-full overflow-hidden text-white">
         <div className="absolute inset-x-0 top-0 h-[62%] md:inset-0 md:h-full">
           <canvas
@@ -310,7 +319,7 @@ export function JourneyShowcase() {
 
         {/* shipment readout */}
         <div className="pointer-events-none absolute top-24 left-5 z-10 font-mono text-[11px] tracking-[0.2em] text-white/60 uppercase sm:left-8 md:left-12">
-          <span ref={clockRef} className="text-white tabular-nums">08:40</span>
+          <span ref={clockRef} className="text-white tabular-nums">07:50</span>
           <span className="mx-2 opacity-50">·</span>
           <span ref={statusRef} className="text-white">{CHAPTERS[0].status}</span>
         </div>
