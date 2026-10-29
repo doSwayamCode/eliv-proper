@@ -76,10 +76,11 @@ body {
   top: 0;
   left: 0;
   padding: 0.2rem 0.45rem;
+  border: 1px solid rgb(46 230 194 / 0.55);
   border-radius: 3px;
-  background: #0d2329;
-  box-shadow: 0 4px 14px rgb(13 35 41 / 0.18);
-  color: #ffffff;
+  background: rgb(3 18 24 / 0.82);
+  backdrop-filter: blur(4px);
+  color: #e9fffa;
   font-size: 0.6rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -98,7 +99,7 @@ body {
   left: 50%;
   transform: translate(-50%, 0);
   border: 5px solid transparent;
-  border-top-color: #0d2329;
+  border-top-color: rgb(46 230 194 / 0.55);
 }
 
 .globe-label[data-visible] {
@@ -127,29 +128,22 @@ body {
 .journey-chapter {
   opacity: 0;
   transform: translate3d(0, 18px, 0);
-  filter: blur(6px);
-  transition: opacity 0.6s cubic-bezier(0.2, 0.7, 0.2, 1), transform 0.8s cubic-bezier(0.2, 0.7, 0.2, 1), filter 0.6s ease;
+  transition: opacity 0.6s cubic-bezier(0.2, 0.7, 0.2, 1), transform 0.8s cubic-bezier(0.2, 0.7, 0.2, 1);
   will-change: opacity, transform;
 }
 .journey-chapter[data-active] {
   opacity: 1;
   transform: none;
-  filter: none;
 }
-/* overlay palette follows the time of day in the film */
-.journey-stage { --j-ink: #0b0c10; --j-body: #525252; --j-muted: #737373; --j-rail: rgb(0 0 0 / 0.28); --j-rail-done: rgb(0 0 0 / 0.5); }
-.journey-stage[data-night] { --j-ink: #f2f5fb; --j-body: #b7c0d6; --j-muted: #8e99b4; --j-rail: rgb(255 255 255 / 0.3); --j-rail-done: rgb(255 255 255 / 0.55); }
-.j-ink { color: var(--j-ink); transition: color 0.7s ease; }
-.j-body { color: var(--j-body); transition: color 0.7s ease; }
-.j-muted { color: var(--j-muted); transition: color 0.7s ease; }
-.journey-rail { color: var(--j-rail); transition: color 0.5s ease; }
-.journey-rail[data-done] { color: var(--j-rail-done); }
-.journey-rail[data-active] { color: #1d55d6; }
+.journey-rail { color: rgb(255 255 255 / 0.32); transition: color 0.5s ease; }
+.journey-rail[data-done] { color: rgb(255 255 255 / 0.6); }
+.journey-rail[data-active] { color: #fff; }
 
 /* Reveal-on-scroll helper (components/motion/reveal.tsx) */
 [data-reveal] { opacity: 0; transform: translate3d(0, 28px, 0); transition: opacity 0.9s cubic-bezier(0.2, 0.7, 0.2, 1), transform 1s cubic-bezier(0.2, 0.7, 0.2, 1); }
 [data-reveal].is-in { opacity: 1; transform: none; }
 
 @media (prefers-reduced-motion: reduce) {
+  .journey-chapter { transition: opacity 0.2s linear; transform: none; }
   [data-reveal] { opacity: 1; transform: none; transition: none; }
 }
