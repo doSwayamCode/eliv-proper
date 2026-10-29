@@ -5,7 +5,7 @@ import { LAND_POINTS_B64 } from "./land-points";
  * Dotted-earth globe with animated flight routes.
  *
  * Land is a point cloud whose far hemisphere is discarded in the shader, the
- * ocean is a dark sphere that also writes depth (so arcs, pins and planes on
+ * ocean is a plain dark sphere that also writes depth (so arcs, pins and planes on
  * the back are hidden for free), and each route draws itself as an arc with an
  * airplane riding its head. Labels are left to the caller: `onFrame` reports
  * every place's screen position and whether it faces the camera.
@@ -16,10 +16,8 @@ export type GlobeRoute = { from: string; to: string };
 export type ProjectedPlace = { id: string; x: number; y: number; visible: boolean };
 
 export const GLOBE_COLORS = {
-  ocean: new THREE.Color("#030d14"),
-  oceanRim: new THREE.Color("#0b3440"),
+  ocean: new THREE.Color("#000000"), // matches the hero background, so the globe has no visible edge
   land: new THREE.Color("#a9f0e4"),
-  atmosphere: new THREE.Color("#22d3b4"),
   arc: new THREE.Color("#2ee6c2"),
   pin: new THREE.Color("#5ff7d4"),
   plane: new THREE.Color("#f2fffc"),
@@ -145,10 +143,10 @@ export class GlobeScene {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, powerPreference: "high-performance" });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     this.renderer.setClearColor(0x000000, 0);
-    this.camera.position.set(0, 0, 4.25);
+    this.camera.position.set(0, 0, 5.2); // globe fills ~72% of the canvas
     this.scene.add(this.globe);
 
-    this.globe.add(this.buildOcean(), this.buildAtmosphere());
+    this.globe.add(this.buildOcean());
     this.pointsMaterial = this.buildLandMaterial();
     this.globe.add(new THREE.Points(this.buildLandGeometry(), this.pointsMaterial));
 
@@ -169,51 +167,10 @@ export class GlobeScene {
   /* ----------------------------- build ----------------------------- */
 
   private buildOcean() {
-    // dark body with a faint fresnel rim; writes depth so the far side is occluded
-    const mat = new THREE.ShaderMaterial({
-      uniforms: { uCore: { value: GLOBE_COLORS.ocean }, uRim: { value: GLOBE_COLORS.oceanRim } },
-      vertexShader: `
-        varying vec3 vN; varying vec3 vV;
-        void main() {
-          vec4 wp = modelMatrix * vec4(position, 1.0);
-          vN = normalize(mat3(modelMatrix) * normal);
-          vV = normalize(cameraPosition - wp.xyz);
-          gl_Position = projectionMatrix * viewMatrix * wp;
-        }`,
-      fragmentShader: `
-        uniform vec3 uCore; uniform vec3 uRim; varying vec3 vN; varying vec3 vV;
-        void main() {
-          float f = pow(1.0 - max(dot(vN, vV), 0.0), 2.6);
-          gl_FragColor = vec4(mix(uCore, uRim, f), 1.0);
-        }`,
-    });
+    // flat dark body with no rim or halo, so the dots alone define the edge;
+    // it writes depth, which hides arcs, pins and planes on the far side
+    const mat = new THREE.MeshBasicMaterial({ color: GLOBE_COLORS.ocean });
     return new THREE.Mesh(new THREE.SphereGeometry(RADIUS * 0.995, 64, 48), mat);
-  }
-
-  private buildAtmosphere() {
-    const mat = new THREE.ShaderMaterial({
-      uniforms: { uColor: { value: GLOBE_COLORS.atmosphere } },
-      vertexShader: `
-        varying vec3 vN; varying vec3 vV;
-        void main() {
-          vec4 wp = modelMatrix * vec4(position, 1.0);
-          vN = normalize(mat3(modelMatrix) * normal);
-          vV = normalize(cameraPosition - wp.xyz);
-          gl_Position = projectionMatrix * viewMatrix * wp;
-        }`,
-      fragmentShader: `
-        uniform vec3 uColor; varying vec3 vN; varying vec3 vV;
-        void main() {
-          // back faces of a larger shell: brightest just outside the limb, fading into space
-          float i = pow(clamp(0.78 + dot(vN, vV), 0.0, 1.0), 3.0);
-          gl_FragColor = vec4(uColor * i * 2.2, i);
-        }`,
-      side: THREE.BackSide,
-      blending: THREE.AdditiveBlending,
-      transparent: true,
-      depthWrite: false,
-    });
-    return new THREE.Mesh(new THREE.SphereGeometry(RADIUS * 1.17, 64, 48), mat);
   }
 
   private buildLandGeometry() {
