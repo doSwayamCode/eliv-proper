@@ -143,7 +143,7 @@ export class GlobeScene {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, powerPreference: "high-performance" });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     this.renderer.setClearColor(0x000000, 0);
-    this.camera.position.set(0, 0, 4.7); // globe fills ~80% of the canvas
+    this.camera.position.set(0, 0, 5.2); // globe fills ~72% of the canvas
     this.scene.add(this.globe);
 
     this.globe.add(this.buildOcean());
