@@ -1,210 +1,298 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import gsap from "gsap";
-import { ScrollTrigger } from "gsap/ScrollTrigger";
 
-gsap.registerPlugin(ScrollTrigger);
+/** Frame sequences built by scripts/extract-journey-frames.sh (12 fps of the 20 s master). */
+const FRAME_COUNT = 240;
+const FPS = 12;
+const FRAME_SIZE = { d: [1600, 900], m: [960, 540] } as const;
+const frameSrc = (set: "d" | "m", i: number) => `/journey/${set}/${String(i).padStart(3, "0")}.webp`;
 
-const CHAPTER_COPY = [
+/** `at` is the footage time (s) the chapter starts; `focus` is the horizontal subject position for cover-cropping. */
+const CHAPTERS = [
   {
     key: "pickup",
+    at: 0,
+    focus: 0.42,
+    status: "Picked up",
     eyebrow: "01 — Pickup",
     title: "Handed over at the door.",
-    body: "Our courier loads your consignment straight into its container. From the first touch it is on one file, with one team.",
+    body: "Our courier collects your consignment and walks it straight to its container. From the first touch it is on one file, with one team.",
   },
   {
-    key: "yard",
-    eyebrow: "02 — The yard",
-    title: "Picked with precision.",
-    body: "Every box starts on our own hardstand: staged, checked and lifted by our team, not a subcontractor's.",
+    key: "pack",
+    at: 4.6,
+    focus: 0.45,
+    status: "Packing",
+    eyebrow: "02 — Packed",
+    title: "Stowed by hand, checked by eye.",
+    body: "Every carton is placed, braced and counted by our own people, not a subcontractor's, so what leaves is what you booked.",
   },
   {
-    key: "load",
-    eyebrow: "03 — Load",
-    title: "Loaded on the same file.",
-    body: "Container, chassis and driver are booked together, so the handoff from yard to road is a lift, not a phone call.",
-  },
-  {
-    key: "road",
-    eyebrow: "04 — Road",
-    title: "Every leg of the journey.",
-    body: "Local, metro and interstate legs run on live tracking. You see the truck the way our dispatch team does.",
+    key: "dispatch",
+    at: 7.9,
+    focus: 0.5,
+    status: "Sealed · dispatched",
+    eyebrow: "03 — Dispatch",
+    title: "Sealed and on the road.",
+    body: "Doors locked, seal recorded, driver booked on the same file. The handoff from depot to road is a lift, not a phone call.",
   },
   {
     key: "port",
-    eyebrow: "05 — Port",
+    at: 9.95,
+    focus: 0.42,
+    status: "At terminal",
+    eyebrow: "04 — Port",
+    title: "Into the terminal, on time.",
+    body: "Slots, customs release and stevedoring are coordinated in-house, so your box makes the vessel cut-off through the night.",
+  },
+  {
+    key: "load",
+    at: 12,
+    focus: 0.45,
+    status: "Loaded aboard",
+    eyebrow: "05 — Load",
     title: "Quay to vessel, no gaps.",
-    body: "Terminal slots, customs release and stevedoring are coordinated in-house, so your box makes the cut-off.",
+    body: "Lifted from chassis to ship under our supervision, with every move logged against your consignment.",
   },
   {
     key: "sea",
+    at: 17.9,
+    focus: 0.5,
+    status: "Under way",
     eyebrow: "06 — Sea",
     title: "Across APAC, tracked to the door.",
-    body: "Australia, New Zealand, Hong Kong and China. One operator from the yard gate to the final mile.",
+    body: "Australia, New Zealand, Hong Kong and China. One operator from the depot gate to the final mile.",
   },
 ];
 
+/** Shipment clock in minutes, keyed to footage time; the jump at 10 s is the day-to-night cut in the film. */
+const CLOCK: [number, number][] = [
+  [0, 8 * 60 + 40],
+  [9.95, 14 * 60 + 55],
+  [10, 19 * 60 + 40],
+  [20, 22 * 60 + 10],
+];
+
+function clockAt(t: number) {
+  for (let i = 1; i < CLOCK.length; i++) {
+    const [t0, m0] = CLOCK[i - 1];
+    const [t1, m1] = CLOCK[i];
+    if (t <= t1) {
+      const m = Math.floor(m0 + ((t - t0) / (t1 - t0)) * (m1 - m0));
+      return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+    }
+  }
+  return "22:10";
+}
+
+/** Coarse-to-fine load order (every 16th frame, then 8th, …) so scrubbing works before the set is complete. */
+function loadOrder() {
+  const seen = new Set<number>();
+  const order: number[] = [];
+  for (const stride of [16, 8, 4, 2, 1])
+    for (let i = 0; i < FRAME_COUNT; i += stride)
+      if (!seen.has(i)) {
+        seen.add(i);
+        order.push(i);
+      }
+  if (!seen.has(FRAME_COUNT - 1)) order.splice(1, 0, FRAME_COUNT - 1);
+  return order;
+}
+
 /**
- * Scroll-scrubbed 3D logistics film: courier pickup → yard → reach stacker →
- * truck → road (day turns to night) → quay crane → vessel. The section is tall; its stage is `position: sticky`,
- * so there is no pin-spacer reflow and the browser composites it for free.
+ * Scroll-scrubbed live-action film: courier pickup → packing → dispatch →
+ * port at night → loaded aboard → vessel under way. Frames are drawn to a canvas
+ * from a pre-decoded image sequence, which stays smooth where seeking a <video> stutters.
+ * The section is tall and its stage is `position: sticky`, so nothing is pinned or reflowed.
  */
 export function JourneyShowcase() {
   const sectionRef = useRef<HTMLElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const speedRef = useRef<HTMLSpanElement>(null);
-  const unitRef = useRef<HTMLSpanElement>(null);
   const clockRef = useRef<HTMLSpanElement>(null);
-  const stageRef = useRef<HTMLDivElement>(null);
-  const dayScrimRef = useRef<HTMLDivElement>(null);
-  const nightScrimRef = useRef<HTMLDivElement>(null);
+  const statusRef = useRef<HTMLSpanElement>(null);
   const barRef = useRef<HTMLDivElement>(null);
   const chapterRefs = useRef<(HTMLDivElement | null)[]>([]);
   const railRefs = useRef<(HTMLLIElement | null)[]>([]);
   const [ready, setReady] = useState(false);
-  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
+    const section = sectionRef.current;
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext("2d", { alpha: false });
+    if (!section || !canvas || !ctx) return;
+
+    const set = window.matchMedia("(max-width: 767px)").matches ? "m" : "d";
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const frames: (HTMLImageElement | null)[] = new Array(FRAME_COUNT).fill(null);
     let disposed = false;
-    let cleanup = () => {};
+    let loading = false;
 
-    (async () => {
-      const [{ JourneyScene }, { buildTimeline, CHAPTERS }] = await Promise.all([
-        import("@/lib/journey/scene"),
-        import("@/lib/journey/timeline"),
-      ]);
-      if (disposed || !canvasRef.current || !sectionRef.current) return;
+    let target = 0;
+    let current = 0;
+    let drawn = -1;
+    let dirty = true;
+    let activeChapter = -1;
+    let raf = 0;
+    let last = 0;
+    let visible = false;
 
-      let scene: InstanceType<typeof JourneyScene>;
-      try {
-        scene = new JourneyScene(canvasRef.current, { mobile: window.matchMedia("(max-width: 767px)").matches });
-      } catch {
-        setFailed(true);
-        return;
-      }
-      const state = scene.initialState();
-      const tl = buildTimeline(scene, state);
-      const total = tl.duration();
-
-      const stage = canvasRef.current.parentElement!;
-      const resize = () => scene.resize(stage.clientWidth, stage.clientHeight);
-      resize();
-      const ro = new ResizeObserver(resize);
-      ro.observe(stage);
-
-      let target = 0;
-      let current = 0;
-      let visible = true;
-      let activeChapter = -1;
-      let isNight = false;
-      let lastNight = -1;
-      let debugOverride: Partial<typeof state> | null = null;
-      const st = ScrollTrigger.create({
-        trigger: sectionRef.current,
-        start: "top top",
-        end: "bottom bottom",
-        onUpdate: (self) => (target = self.progress),
-      });
-      target = current = st.progress;
-
-      const io = new IntersectionObserver(([e]) => (visible = e.isIntersecting), { rootMargin: "200px 0px" });
-      io.observe(sectionRef.current);
-
-      const frame = (time: number, deltaMs: number) => {
-        if (!visible) return;
-        // critically-damped follow on top of Lenis: no jumps on wheel ticks or scrollbar drags
-        const k = 1 - Math.exp(-(deltaMs / 1000) * 9);
-        current += (target - current) * k;
-        if (Math.abs(target - current) < 1e-5) current = target;
-        tl.progress(current);
-        if (debugOverride) Object.assign(state, debugOverride);
-        const t = tl.time();
-        scene.update(state, t);
-        scene.tick(time);
-        scene.render();
-
-        // HUD — written straight to the DOM, no React renders per frame
-        let ch = 0;
-        for (let i = 0; i < CHAPTERS.length; i++) if (t >= CHAPTERS[i].at) ch = i;
-        if (ch !== activeChapter) {
-          activeChapter = ch;
-          chapterRefs.current.forEach((el, i) => el?.toggleAttribute("data-active", i === ch));
-          railRefs.current.forEach((el, i) => {
-            el?.toggleAttribute("data-active", i === ch);
-            el?.toggleAttribute("data-done", i < ch);
-          });
-        }
-        if (speedRef.current) speedRef.current.textContent = String(Math.min(99, Math.round(scene.speed))).padStart(2, "0");
-        if (unitRef.current) unitRef.current.textContent = state.mode >= 4 ? "KN" : "KM/H";
-        if (barRef.current) barRef.current.style.transform = `scaleX(${t / total})`;
-
-        // the day passes: a clock from 09:10 to past 23:00, and the overlay follows the light
-        if (clockRef.current) {
-          const mins = Math.floor(550 + (t / total) * 870);
-          clockRef.current.textContent = `${String(Math.floor(mins / 60) % 24).padStart(2, "0")}:${String(mins % 60).padStart(2, "0")}`;
-        }
-        const n = state.night;
-        if (Math.abs(n - lastNight) > 1e-3) {
-          lastNight = n;
-          if (dayScrimRef.current) dayScrimRef.current.style.opacity = String(1 - n);
-          if (nightScrimRef.current) nightScrimRef.current.style.opacity = String(n);
-          if (n > 0.5 !== isNight) {
-            isNight = n > 0.5;
-            stageRef.current?.toggleAttribute("data-night", isNight);
+    const load = () => {
+      if (loading) return;
+      loading = true;
+      const queue = loadOrder();
+      const worker = async () => {
+        while (queue.length && !disposed) {
+          const i = queue.shift()!;
+          const img = new Image();
+          img.decoding = "async";
+          img.src = frameSrc(set, i);
+          try {
+            await img.decode();
+          } catch {
+            continue;
           }
+          if (disposed) return;
+          frames[i] = img;
+          if (i === 0) setReady(true);
+          dirty = true;
+          kick();
         }
       };
-      // `?journey-debug` freezes the loop and exposes a manual seek — used for visual QA screenshots
-      const debug = new URLSearchParams(window.location.search).has("journey-debug");
-      if (debug) {
-        // optional override pins state fields (e.g. a close-up camera) for inspection
-        (window as unknown as { __journeySeek?: (p: number, o?: Partial<typeof state>) => void }).__journeySeek = (p, o) => {
-          debugOverride = o ?? null;
-          target = current = p;
-          visible = true;
-          frame(gsap.ticker.time, 16);
-        };
-      } else gsap.ticker.add(frame);
-      frame(gsap.ticker.time, 1000);
-      setReady(true);
+      for (let w = 0; w < 6; w++) void worker();
+    };
 
-      cleanup = () => {
-        gsap.ticker.remove(frame);
-        st.kill();
-        io.disconnect();
-        ro.disconnect();
-        tl.kill();
-        scene.dispose();
-      };
-    })();
+    const resize = () => {
+      // no point drawing more pixels than the frames have: cap the backing store at source resolution
+      const [sw, sh] = FRAME_SIZE[set];
+      const cover = Math.max(canvas.clientWidth / sw, canvas.clientHeight / sh);
+      const dpr = Math.min(window.devicePixelRatio || 1, 2, Math.max(1, 1 / cover));
+      const w = Math.round(canvas.clientWidth * dpr);
+      const h = Math.round(canvas.clientHeight * dpr);
+      if (canvas.width !== w || canvas.height !== h) {
+        canvas.width = w;
+        canvas.height = h;
+        dirty = true;
+        kick();
+      }
+    };
+
+    const readScroll = () => {
+      const r = section.getBoundingClientRect();
+      const span = r.height - window.innerHeight;
+      target = span > 0 ? Math.min(1, Math.max(0, -r.top / span)) : 0;
+      kick();
+    };
+
+    /** nearest frame that has loaded, searching outward from the wanted one */
+    const nearest = (i: number) => {
+      for (let d = 0; d < FRAME_COUNT; d++) {
+        if (frames[i - d]) return i - d;
+        if (frames[i + d]) return i + d;
+      }
+      return -1;
+    };
+
+    const draw = (i: number, focus: number) => {
+      const img = frames[i]!;
+      const cw = canvas.width;
+      const ch = canvas.height;
+      const s = Math.max(cw / img.naturalWidth, ch / img.naturalHeight);
+      const w = img.naturalWidth * s;
+      const h = img.naturalHeight * s;
+      const x = Math.min(0, Math.max(cw - w, cw / 2 - w * focus));
+      ctx.drawImage(img, x, (ch - h) / 2, w, h);
+    };
+
+    const frame = (now: number) => {
+      raf = 0;
+      const dt = last ? Math.min(now - last, 100) : 16;
+      last = now;
+      // critically-damped follow: wheel ticks and scrollbar drags glide instead of jumping
+      current = reduceMotion ? target : current + (target - current) * (1 - Math.exp(-(dt / 1000) * 10));
+      if (Math.abs(target - current) < 1e-4) current = target;
+
+      const t = current * ((FRAME_COUNT - 1) / FPS);
+      let chIdx = 0;
+      for (let i = 0; i < CHAPTERS.length; i++) if (t >= CHAPTERS[i].at) chIdx = i;
+
+      const want = Math.round(current * (FRAME_COUNT - 1));
+      const i = nearest(want);
+      if (i >= 0 && (i !== drawn || dirty)) {
+        draw(i, CHAPTERS[chIdx].focus);
+        drawn = i;
+        dirty = false;
+      }
+
+      // HUD — written straight to the DOM, no React renders per frame
+      if (chIdx !== activeChapter) {
+        activeChapter = chIdx;
+        chapterRefs.current.forEach((el, k) => el?.toggleAttribute("data-active", k === chIdx));
+        railRefs.current.forEach((el, k) => {
+          el?.toggleAttribute("data-active", k === chIdx);
+          el?.toggleAttribute("data-done", k < chIdx);
+        });
+        if (statusRef.current) statusRef.current.textContent = CHAPTERS[chIdx].status;
+      }
+      if (clockRef.current) clockRef.current.textContent = clockAt(t);
+      if (barRef.current) barRef.current.style.transform = `scaleX(${current})`;
+
+      // keep gliding until settled; a frame that is still loading redraws via load()
+      if (current !== target) kick();
+      else last = 0;
+    };
+
+    function kick() {
+      if (!raf && !disposed && visible) raf = requestAnimationFrame(frame);
+    }
+
+    // start fetching well before the section arrives, but never ahead of the hero's own assets
+    const whenIdle = () => {
+      const go = () => ("requestIdleCallback" in window ? requestIdleCallback(load, { timeout: 1500 }) : setTimeout(load, 300));
+      if (document.readyState === "complete") go();
+      else window.addEventListener("load", go, { once: true });
+    };
+    const near = new IntersectionObserver(([e]) => e.isIntersecting && whenIdle(), { rootMargin: "150% 0px" });
+    const onScreen = new IntersectionObserver(([e]) => {
+      visible = e.isIntersecting;
+      if (visible) readScroll();
+    });
+    near.observe(section);
+    onScreen.observe(section);
+    const ro = new ResizeObserver(resize);
+    ro.observe(canvas);
+    window.addEventListener("scroll", readScroll, { passive: true });
+    readScroll();
+    current = target;
 
     return () => {
       disposed = true;
-      cleanup();
+      cancelAnimationFrame(raf);
+      near.disconnect();
+      onScreen.disconnect();
+      ro.disconnect();
+      window.removeEventListener("scroll", readScroll);
     };
   }, []);
 
   return (
-    <section ref={sectionRef} id="journey" aria-label="From yard to vessel" className="relative h-[1450vh] bg-[#eef0f3] md:h-[1700vh]">
-      <div ref={stageRef} className="journey-stage sticky top-0 h-[100svh] w-full overflow-hidden">
-        <canvas
-          ref={canvasRef}
-          className={`absolute inset-0 h-full w-full transition-opacity duration-700 ${ready ? "opacity-100" : "opacity-0"}`}
-          aria-hidden
-        />
-        {failed && (
-          <div className="absolute inset-0 bg-[#0d0e12]" aria-hidden />
-        )}
-
-        {/* soft scrim keeps copy legible over the 3D stage */}
-        <div ref={dayScrimRef} className="pointer-events-none absolute inset-0 z-[5] bg-[linear-gradient(to_top,rgba(238,240,243,0.95)_0%,rgba(238,240,243,0.6)_30%,transparent_55%)] md:bg-[linear-gradient(to_right,rgba(238,240,243,0.92)_0%,rgba(238,240,243,0.55)_30%,transparent_48%)]" />
-        <div ref={nightScrimRef} style={{ opacity: 0 }} className="pointer-events-none absolute inset-0 z-[5] bg-[linear-gradient(to_top,rgba(7,13,27,0.92)_0%,rgba(7,13,27,0.55)_30%,transparent_55%)] md:bg-[linear-gradient(to_right,rgba(7,13,27,0.85)_0%,rgba(7,13,27,0.45)_30%,transparent_48%)]" />
+    <section ref={sectionRef} id="journey" aria-label="From depot to vessel" className="relative h-[700vh] bg-[#07090d] md:h-[820vh]">
+      <div className="journey-stage sticky top-0 h-[100svh] w-full overflow-hidden text-white">
+        <div className="absolute inset-x-0 top-0 h-[62%] md:inset-0 md:h-full">
+          <canvas
+            ref={canvasRef}
+            className={`absolute inset-0 h-full w-full transition-opacity duration-700 ${ready ? "opacity-100" : "opacity-0"}`}
+            aria-hidden
+          />
+          {/* scrims keep the copy legible over live footage */}
+          <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_top,#07090d_0%,rgba(7,9,13,0.4)_22%,transparent_45%)] md:bg-[linear-gradient(to_right,rgba(7,9,13,0.88)_0%,rgba(7,9,13,0.55)_28%,transparent_52%)]" />
+          <div className="pointer-events-none absolute inset-x-0 top-0 h-40 bg-gradient-to-b from-black/55 to-transparent" />
+        </div>
 
         {/* chapter copy */}
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 px-5 pb-24 sm:px-8 md:inset-y-0 md:left-0 md:right-auto md:flex md:w-[44vw] md:max-w-[560px] md:items-center md:pb-0 md:pl-12">
-          <div className="relative h-[190px] w-full md:h-[260px]">
-            {CHAPTER_COPY.map((c, i) => (
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 px-5 pb-16 sm:px-8 md:inset-y-0 md:left-0 md:right-auto md:flex md:w-[44vw] md:max-w-[560px] md:items-center md:pb-0 md:pl-12">
+          <div className="relative h-[230px] w-full md:h-[270px]">
+            {CHAPTERS.map((c, i) => (
               <div
                 key={c.key}
                 ref={(el) => {
@@ -212,26 +300,24 @@ export function JourneyShowcase() {
                 }}
                 className="journey-chapter absolute inset-0"
               >
-                <p className="j-muted font-mono text-[11px] tracking-[0.22em] uppercase">{c.eyebrow}</p>
-                <h3 className="mt-3 text-[34px] leading-[0.98] font-semibold tracking-[-0.03em] j-ink sm:text-5xl md:text-[58px]">
-                  {c.title}
-                </h3>
-                <p className="mt-4 max-w-[400px] text-[14px] leading-relaxed j-body md:text-[15px]">{c.body}</p>
+                <p className="font-mono text-[11px] tracking-[0.22em] text-white/60 uppercase">{c.eyebrow}</p>
+                <h3 className="mt-3 text-[32px] leading-[0.98] font-semibold tracking-[-0.03em] sm:text-5xl md:text-[56px]">{c.title}</h3>
+                <p className="mt-4 max-w-[400px] text-[14px] leading-relaxed text-white/75 md:text-[15px]">{c.body}</p>
               </div>
             ))}
           </div>
         </div>
 
-        {/* speedometer, like a dash readout */}
-        <div className="j-muted pointer-events-none absolute top-24 left-5 z-10 font-mono text-[11px] tracking-[0.2em] sm:left-8 md:left-12">
-          <span ref={clockRef} className="j-ink tabular-nums">09:10</span>
+        {/* shipment readout */}
+        <div className="pointer-events-none absolute top-24 left-5 z-10 font-mono text-[11px] tracking-[0.2em] text-white/60 uppercase sm:left-8 md:left-12">
+          <span ref={clockRef} className="text-white tabular-nums">08:40</span>
           <span className="mx-2 opacity-50">·</span>
-          <span ref={speedRef} className="j-ink tabular-nums">00</span> <span ref={unitRef}>KM/H</span>
+          <span ref={statusRef} className="text-white">{CHAPTERS[0].status}</span>
         </div>
 
         {/* chapter rail */}
-        <ol className="pointer-events-none absolute top-24 right-5 z-10 hidden flex-col items-end gap-3 font-mono text-[10px] tracking-[0.22em] uppercase sm:right-8 md:flex md:right-12">
-          {CHAPTER_COPY.map((c, i) => (
+        <ol className="pointer-events-none absolute top-24 right-5 z-10 hidden flex-col items-end gap-3 font-mono text-[10px] tracking-[0.22em] uppercase sm:right-8 md:right-12 md:flex">
+          {CHAPTERS.map((c, i) => (
             <li
               key={c.key}
               ref={(el) => {
@@ -245,7 +331,7 @@ export function JourneyShowcase() {
           ))}
         </ol>
 
-        <div className="absolute inset-x-0 bottom-0 z-10 h-[3px] bg-black/5">
+        <div className="absolute inset-x-0 bottom-0 z-10 h-[3px] bg-white/10">
           <div ref={barRef} className="h-full origin-left bg-[#1d55d6]" style={{ transform: "scaleX(0)" }} />
         </div>
       </div>
