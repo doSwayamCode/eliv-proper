@@ -135,9 +135,15 @@ body {
   opacity: 1;
   transform: none;
 }
-.journey-rail { color: rgb(255 255 255 / 0.32); transition: color 0.5s ease; }
-.journey-rail[data-done] { color: rgb(255 255 255 / 0.6); }
-.journey-rail[data-active] { color: #fff; }
+/* overlay palette follows the time of day in the film */
+.journey-stage { --j-ink: #0b0c10; --j-body: #525252; --j-muted: #737373; --j-rail: rgb(0 0 0 / 0.28); --j-rail-done: rgb(0 0 0 / 0.5); }
+.journey-stage[data-night] { --j-ink: #f2f5fb; --j-body: #b7c0d6; --j-muted: #8e99b4; --j-rail: rgb(255 255 255 / 0.3); --j-rail-done: rgb(255 255 255 / 0.55); }
+.j-ink { color: var(--j-ink); transition: color 0.7s ease; }
+.j-body { color: var(--j-body); transition: color 0.7s ease; }
+.j-muted { color: var(--j-muted); transition: color 0.7s ease; }
+.journey-rail { color: var(--j-rail); transition: color 0.5s ease; }
+.journey-rail[data-done] { color: var(--j-rail-done); }
+.journey-rail[data-active] { color: #1d55d6; }
 
 /* Reveal-on-scroll helper (components/motion/reveal.tsx) */
 [data-reveal] { opacity: 0; transform: translate3d(0, 28px, 0); transition: opacity 0.9s cubic-bezier(0.2, 0.7, 0.2, 1), transform 1s cubic-bezier(0.2, 0.7, 0.2, 1); }
